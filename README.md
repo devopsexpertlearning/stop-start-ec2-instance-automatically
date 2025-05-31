@@ -366,7 +366,7 @@ def lambda_handler(event, context):
         logger.error(f"Error: {e}")
         return {"statusCode": 500, "headers": headers, "body": json.dumps({"error": str(e)})}
   ```
-## Note during lambda creation you need to create Role which should have access on EC2, cloudwatch logs.
+#### Note during lambda creation you need to create Role which should have access on EC2, cloudwatch logs.
 
 ### 2. Select create HTTP AWS Gateway API with following routes and integrate Lambda function what create in previous step.
 
