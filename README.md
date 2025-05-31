@@ -157,3 +157,222 @@ To check if your cron job is running:
 ---
 
 # start-ec2-instance-automatically
+
+## Setup Instructions
+
+### 1. Create Lamda Function with this code and select runtime env python 3. File name should be lambda_function.py
+
+  ```python
+  import os
+import json
+import logging
+import boto3
+from botocore.exceptions import ClientError, WaiterError
+
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+
+def get_regions():
+    ec2 = boto3.client("ec2")
+    resp = ec2.describe_regions(AllRegions=True)
+    return [r["RegionName"] for r in resp["Regions"] if r["OptInStatus"] in ("opt-in-not-required", "opted-in")]
+
+def get_instances(region):
+    ec2 = boto3.client("ec2", region_name=region)
+    resp = ec2.describe_instances()
+    instances = []
+    for res in resp["Reservations"]:
+        for inst in res["Instances"]:
+            name = ""
+            for tag in inst.get("Tags", []):
+                if tag["Key"] == "Name":
+                    name = tag["Value"]
+            instances.append({
+                "InstanceId": inst["InstanceId"],
+                "Name": name,
+                "InstanceType": inst["InstanceType"],
+                "State": inst["State"]["Name"]
+            })
+    return instances
+
+def start_instance(region, instance_id):
+    ec2 = boto3.client("ec2", region_name=region)
+    ec2.start_instances(InstanceIds=[instance_id])
+
+def stop_instance(region, instance_id):
+    ec2 = boto3.client("ec2", region_name=region)
+    ec2.stop_instances(InstanceIds=[instance_id])
+
+def wait_for_instance_running(region, instance_id, timeout=120):
+    ec2 = boto3.client("ec2", region_name=region)
+    waiter = ec2.get_waiter("instance_running")
+    try:
+        waiter.wait(InstanceIds=[instance_id], WaiterConfig={"Delay": 5, "MaxAttempts": timeout // 5})
+    except Exception as e:
+        logger.error(f"Error waiting for instance to run: {e}")
+
+def get_instance_ips(region, instance_id):
+    ec2 = boto3.client("ec2", region_name=region)
+    try:
+        resp = ec2.describe_instances(InstanceIds=[instance_id])
+        instance = resp["Reservations"][0]["Instances"][0]
+        public_ip = instance.get("PublicIpAddress")
+        private_ip = instance.get("PrivateIpAddress")
+        return public_ip, private_ip
+    except Exception as e:
+        logger.error(f"Error fetching IPs: {e}")
+        return None, None
+
+def get_instance_state(region, instance_id):
+    ec2 = boto3.client("ec2", region_name=region)
+    try:
+        resp = ec2.describe_instances(InstanceIds=[instance_id])
+        instance = resp["Reservations"][0]["Instances"][0]
+        return instance["State"]["Name"]
+    except Exception as e:
+        logger.error(f"Error getting instance state: {e}")
+        return None
+
+def lambda_handler(event, context):
+    # Log the event for debugging
+    logger.info(f"Received event: {json.dumps(event)}")
+    
+    # API Gateway V2 format paths are in rawPath
+    path = event.get("rawPath", "")
+    
+    # API Gateway V2 method is in requestContext.http.method
+    http_method = event.get("requestContext", {}).get("http", {}).get("method", "GET")
+    
+    params = event.get("queryStringParameters") or {}
+    raw_body = event.get("body")
+    is_base64 = event.get("isBase64Encoded", False)
+    
+    # Handle base64 encoded body (common in API Gateway V2)
+    body = {}
+    if raw_body:
+        if is_base64:
+            import base64
+            raw_body = base64.b64decode(raw_body).decode('utf-8')
+        
+        if isinstance(raw_body, str):
+            try:
+                body = json.loads(raw_body)
+            except Exception as e:
+                logger.error(f"Error parsing body: {e}")
+        elif isinstance(raw_body, dict):
+            body = raw_body
+
+    logger.info(f"Processing API Gateway V2 request: {http_method} {path}")
+    logger.info(f"Body: {json.dumps(body)}")
+    
+    # CORS headers for API Gateway V2
+    headers = {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type,Authorization"
+    }
+
+    try:
+        if path == "/regions":
+            regions = get_regions()
+            return {"statusCode": 200, "headers": headers, "body": json.dumps(regions)}
+        elif path == "/instances":
+            region = params.get("region")
+            if not region:
+                return {"statusCode": 400, "body": "Missing region"}
+            instances = get_instances(region)
+            return {"statusCode": 200, "headers": headers, "body": json.dumps(instances)}
+        elif path == "/start" and http_method == "POST":
+            region = body.get("region")
+            instance_id = body.get("instance_id")
+            if not region or not instance_id:
+                return {"statusCode": 400, "headers": headers, "body": json.dumps({"error": "Missing region or instance_id"})}
+            
+            # Check if instance is already running
+            state = get_instance_state(region, instance_id)
+            if state == "running":
+                public_ip, private_ip = get_instance_ips(region, instance_id)
+                return {
+                    "statusCode": 200,
+                    "headers": headers,
+                    "body": json.dumps({
+                        "message": "Instance is already running",
+                        "public_ip": public_ip,
+                        "private_ip": private_ip
+                    })
+                }
+            
+            start_instance(region, instance_id)
+            wait_for_instance_running(region, instance_id)
+            
+            # Wait for IP to be assigned
+            public_ip, private_ip = None, None
+            import time
+            for _ in range(6):
+                public_ip, private_ip = get_instance_ips(region, instance_id)
+                if public_ip:
+                    break
+                time.sleep(5)
+                
+            return {
+                "statusCode": 200, 
+                "headers": headers,
+                "body": json.dumps({
+                    "message": "Instance started successfully",
+                    "public_ip": public_ip,
+                    "private_ip": private_ip
+                })
+            }
+        elif path == "/stop" and http_method == "POST":
+            region = body.get("region")
+            instance_id = body.get("instance_id")
+            if not region or not instance_id:
+                return {"statusCode": 400, "headers": headers, "body": json.dumps({"error": "Missing region or instance_id"})}
+            
+            # Check if instance is already stopped/stopping
+            state = get_instance_state(region, instance_id)
+            if state in ["stopped", "stopping"]:
+                return {
+                    "statusCode": 200,
+                    "headers": headers,
+                    "body": json.dumps({
+                        "message": f"Instance is already {state}"
+                    })
+                }
+                
+            stop_instance(region, instance_id)
+            return {
+                "statusCode": 200, 
+                "headers": headers, 
+                "body": json.dumps({"message": "Instance stopped successfully"})
+            }
+        elif path == "/get" and http_method == "POST":
+            region = body.get("region")
+            instance_id = body.get("instance_id")
+            if not region or not instance_id:
+                return {"statusCode": 400, "body": "Missing region or instance_id"}
+            public_ip, private_ip = get_instance_ips(region, instance_id)
+            return {
+                "statusCode": 200,
+                "headers": headers,
+                "body": json.dumps({
+                    "public_ip": public_ip,
+                    "private_ip": private_ip
+                })
+            }
+        else:
+            return {"statusCode": 404, "headers": headers, "body": json.dumps({"error": f"Not found: {path}"})}
+    except Exception as e:
+        logger.error(f"Error: {e}")
+        return {"statusCode": 500, "headers": headers, "body": json.dumps({"error": str(e)})}
+  ```
+### Note during lambda creation you need to create Role which should have access on EC2, cloudwatch logs.
+
+### 2. Select create HTTP AWS Gateway API with following routes and integrate Lambda function what create in previous step.
+
+a. /regions - Method 'GET'
+B. /instances - Method 'GET'
+c. /start - Method 'POST'
+d. /stop - Method 'POST'
+e. /get - Method 'POST'
+
