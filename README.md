@@ -116,6 +116,32 @@ sudo apt-get install cron
 sudo service cron start
 ```
 
+### 7. Verify the Cron Job
+
+To check if your cron job is running:
+
+- List your current user's cron jobs:
+
+  ```bash
+  crontab -l
+  ```
+
+  You should see the line you added for the script.
+
+- Check the cron service status:
+
+  ```bash
+  sudo service cron status
+  ```
+
+- To verify that the script is being executed, you can add logging to your script or check the system logs:
+
+  ```bash
+  grep CRON /var/log/syslog
+  ```
+
+  (On some systems, use `/var/log/cron` instead.)
+
 ## How It Works
 
 - The script checks the specified log file for recent activity.
