@@ -155,3 +155,5 @@ To check if your cron job is running:
 - You can modify the idle timeout by changing the `20 minutes ago` value in the script.
 
 ---
+
+# start-ec2-instance-automatically
