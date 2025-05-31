@@ -160,7 +160,8 @@ To check if your cron job is running:
 
 ## Setup Instructions
 
-### 1. Create Lamda Function with this code and select runtime env python 3. File name should be lambda_function.py
+### 1. Create Lamda Function 
+Create lambda function with code and select runtime env python 3. File name should be lambda_function.py
 
   ```python
   import os
@@ -368,7 +369,9 @@ def lambda_handler(event, context):
   ```
 #### Note during lambda creation you need to create Role which should have access on EC2, cloudwatch logs.
 
-### 2. Select create HTTP AWS Gateway API with following routes and integrate Lambda function what create in previous step.
+### 2. Create AWS API Gateway 
+
+Select create HTTP AWS API Gateway with following routes and integrate Lambda function what create in previous step.
 
 - /regions - Method 'GET'
 - /instances - Method 'GET'
