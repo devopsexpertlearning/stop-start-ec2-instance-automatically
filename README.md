@@ -370,9 +370,9 @@ def lambda_handler(event, context):
 
 ### 2. Select create HTTP AWS Gateway API with following routes and integrate Lambda function what create in previous step.
 
-a. /regions - Method 'GET'
-B. /instances - Method 'GET'
-c. /start - Method 'POST'
-d. /stop - Method 'POST'
-e. /get - Method 'POST'
+- /regions - Method 'GET'
+- /instances - Method 'GET'
+- /start - Method 'POST'
+-  /stop - Method 'POST'
+- /get - Method 'POST'
 
