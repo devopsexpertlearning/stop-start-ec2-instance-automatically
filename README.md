@@ -378,4 +378,371 @@ Select create HTTP AWS API Gateway with following routes and integrate Lambda fu
 - /start - Method 'POST'
 -  /stop - Method 'POST'
 - /get - Method 'POST'
+  
+### 3. Create S3 bucket To Host UI
 
+create s3 bucket with bucket policy and create object index.html
+
+```html
+<!DOCTYPE html>
+<html>
+<head>
+    <title>EC2 Control Panel</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body {
+            background: linear-gradient(135deg, #232526 0%, #ff9966 100%);
+            min-height: 100vh;
+            margin: 0;
+            font-family: 'Segoe UI', Arial, sans-serif;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .container {
+            background: rgba(30, 30, 40, 0.45);
+            border-radius: 22px;
+            box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.25);
+            padding: 2.5rem 2rem 2rem 2rem;
+            max-width: 420px;
+            width: 100%;
+            text-align: center;
+            color: #fff;
+            backdrop-filter: blur(12px);
+            border: 1.5px solid rgba(255, 255, 255, 0.18);
+        }
+        h2 {
+            margin-bottom: 1.5rem;
+            color: #ff9966;
+            letter-spacing: 1px;
+            font-weight: 800;
+            font-family: 'Segoe UI', 'Fira Mono', 'Consolas', monospace;
+            text-shadow: 0 2px 8px #23252644;
+        }
+        label {
+            display: block;
+            margin: 1.2rem 0 0.5rem 0;
+            font-size: 1.1rem;
+            color: #ff5e62;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+        }
+        select {
+            width: 90%;
+            padding: 0.6rem;
+            border-radius: 8px;
+            border: none;
+            margin-bottom: 0.8rem;
+            font-size: 1rem;
+            background: rgba(255,255,255,0.85);
+            color: #ff5e62;
+            font-weight: 700;
+            box-shadow: 0 2px 8px rgba(255, 94, 98, 0.08);
+            outline: none;
+            transition: box-shadow 0.2s, background 0.2s;
+        }
+        select:focus {
+            box-shadow: 0 0 0 2px #ff9966;
+            background: #fff;
+        }
+        button {
+            background: linear-gradient(90deg, #ff9966 0%, #ff5e62 100%);
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            padding: 0.7rem 1.5rem;
+            margin: 0.5rem 0.3rem;
+            font-size: 1rem;
+            font-weight: 700;
+            cursor: pointer;
+            box-shadow: 0 2px 8px rgba(255, 94, 98, 0.12);
+            transition: background 0.2s, transform 0.2s;
+            letter-spacing: 0.5px;
+        }
+        button:hover {
+            background: linear-gradient(90deg, #ff5e62 0%, #ff9966 100%);
+            transform: translateY(-2px) scale(1.04);
+        }
+        #result {
+            margin-top: 1.5rem;
+            background: rgba(255, 255, 255, 0.10);
+            border-radius: 8px;
+            padding: 1rem;
+            color: #fff;
+            font-size: 1.05rem;
+            min-height: 2.2rem;
+            word-break: break-all;
+            font-family: 'Fira Mono', 'Consolas', monospace;
+            letter-spacing: 0.5px;
+        }
+        .spinner-overlay {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(255, 153, 102, 0.12);
+            z-index: 1000;
+            display: none;
+            align-items: center;
+            justify-content: center;
+        }
+        .spinner {
+            border: 6px solid #fff;
+            border-top: 6px solid #ff5e62;
+            border-radius: 50%;
+            width: 48px;
+            height: 48px;
+            animation: spin 1s linear infinite;
+            margin: auto;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg);}
+            100% { transform: rotate(360deg);}
+        }
+        #instance-group {
+            display: none;
+        }
+        @media (max-width: 500px) {
+            .container {
+                padding: 1.2rem 0.5rem 1rem 0.5rem;
+                max-width: 98vw;
+            }
+            h2 {
+                font-size: 1.2rem;
+            }
+            button {
+                width: 90%;
+                margin: 0.5rem 0;
+            }
+        }
+        /* DevOps accent bar */
+        .accent-bar {
+            width: 60px;
+            height: 6px;
+            border-radius: 3px;
+            margin: 0 auto 1.5rem auto;
+            background: linear-gradient(90deg, #ff9966 0%, #ff5e62 100%);
+            box-shadow: 0 2px 8px #ff5e6244;
+        }
+    </style>
+</head>
+<body>
+    <div class="spinner-overlay" id="spinner-overlay">
+        <div class="spinner"></div>
+    </div>
+    <div class="container">
+        <div class="accent-bar"></div>
+        <h2>EC2 Instance Control</h2>
+        <label for="region">Region:</label>
+        <select id="region">
+            <option value="">Select region</option>
+        </select>
+        <div id="instance-group" style="display:none;">
+            <label for="instance">Instance:</label>
+            <select id="instance"></select>
+        </div>
+        <div>
+            <button onclick="startInstance()">Start</button>
+            <button onclick="stopInstance()">Stop</button>
+            <button onclick="getIPs()">Get IPs</button>
+        </div>
+        <div id="result"></div>
+    </div>
+    <script>
+        const apiBase = "https://zd0420hz7k.execute-api.ap-east-1.amazonaws.com";
+        function showSpinner(show) {
+            document.getElementById("spinner-overlay").style.display = show ? "flex" : "none";
+        }
+
+        async function fetchRegions() {
+            showSpinner(true);
+            const sel = document.getElementById("region");
+            sel.innerHTML = '<option value="">Select region</option>';
+            document.getElementById("instance-group").style.display = "none";
+            document.getElementById("result").innerText = ""; 
+            
+            try {
+                const res = await fetch(apiBase + "/regions");
+                const rawData = await res.text();
+                
+                // Parse the response based on what we received
+                let regions = [];
+                try {
+                    const data = JSON.parse(rawData);
+                    if (Array.isArray(data)) {
+                        regions = data;
+                    } else if (data && data.body) {
+                        if (typeof data.body === 'string') {
+                            regions = JSON.parse(data.body);
+                        } else if (Array.isArray(data.body)) {
+                            regions = data.body;
+                        }
+                    }
+                } catch (e) {
+                    // Silent error handling
+                }
+                
+                // Sort regions alphabetically
+                regions.sort();
+                
+                regions.forEach(r => {
+                    const opt = document.createElement("option");
+                    opt.value = r;
+                    opt.text = r;
+                    sel.appendChild(opt);
+                });
+            } catch (e) {
+                sel.innerHTML = '<option value="">Error loading regions</option>';
+            }
+            showSpinner(false);
+        }
+
+        async function fetchInstances(region) {
+            const sel = document.getElementById("instance");
+            const group = document.getElementById("instance-group");
+            sel.innerHTML = "<option>Loading...</option>";
+            group.style.display = "none";
+            if (!region) {
+                sel.innerHTML = "";
+                return;
+            }
+            showSpinner(true);
+            try {
+                const res = await fetch(apiBase + "/instances?region=" + encodeURIComponent(region));
+                const rawData = await res.text();
+                
+                // Parse the response based on what we received
+                let instances = [];
+                try {
+                    const data = JSON.parse(rawData);
+                    if (Array.isArray(data)) {
+                        instances = data;
+                    } else if (data && data.body) {
+                        if (typeof data.body === 'string') {
+                            instances = JSON.parse(data.body);
+                        } else if (Array.isArray(data.body)) {
+                            instances = data.body;
+                        }
+                    }
+                } catch (e) {
+                    // Silent error handling
+                }
+                
+                sel.innerHTML = "";
+                if (instances.length === 0) {
+                    sel.innerHTML = "<option>No instances found</option>";
+                } else {
+                    instances.forEach(i => {
+                        const opt = document.createElement("option");
+                        opt.value = i.InstanceId;
+                        opt.text = `${i.InstanceId} - ${i.InstanceType} ${i.Name ? `(${i.Name})` : ''} [${i.State}]`;
+                        sel.appendChild(opt);
+                    });
+                }
+                group.style.display = "block";
+            } catch (e) {
+                sel.innerHTML = "<option>Error loading instances</option>";
+            }
+            showSpinner(false);
+        }
+
+        async function startInstance() {
+            showSpinner(true);
+            document.getElementById("result").innerText = "Starting instance...";
+            const region = document.getElementById("region").value;
+            const instance_id = document.getElementById("instance").value;
+            if (!region || !instance_id) {
+                document.getElementById("result").innerText = "Please select region and instance.";
+                showSpinner(false);
+                return;
+            }
+            try {
+                const res = await fetch(apiBase + "/start", {
+                    method: "POST",
+                    headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify({region, instance_id})
+                });
+                const data = await res.json();
+                let resultText = data.message || "Unknown response";
+                
+                // Add IP information if available
+                if (data.public_ip || data.private_ip) {
+                    resultText += `\nPublic IP: ${data.public_ip || "N/A"}`;
+                    resultText += `\nPrivate IP: ${data.private_ip || "N/A"}`;
+                }
+                
+                document.getElementById("result").innerText = resultText;
+            } catch (e) {
+                document.getElementById("result").innerText = "Error starting instance.";
+            }
+            showSpinner(false);
+        }
+
+        async function stopInstance() {
+            showSpinner(true);
+            document.getElementById("result").innerText = "Stopping instance...";
+            const region = document.getElementById("region").value;
+            const instance_id = document.getElementById("instance").value;
+            if (!region || !instance_id) {
+                document.getElementById("result").innerText = "Please select region and instance.";
+                showSpinner(false);
+                return;
+            }
+            try {
+                const res = await fetch(apiBase + "/stop", {
+                    method: "POST",
+                    headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify({region, instance_id})
+                });
+                const data = await res.json();
+                document.getElementById("result").innerText = data.message || data.error || "Unknown response";
+            } catch (e) {
+                document.getElementById("result").innerText = "Error stopping instance.";
+            }
+            showSpinner(false);
+        }
+
+        async function getIPs() {
+            showSpinner(true);
+            document.getElementById("result").innerText = "Fetching IP addresses...";
+            const region = document.getElementById("region").value;
+            const instance_id = document.getElementById("instance").value;
+            if (!region || !instance_id) {
+                document.getElementById("result").innerText = "Please select region and instance.";
+                showSpinner(false);
+                return;
+            }
+            try {
+                const res = await fetch(apiBase + "/get", {
+                    method: "POST",
+                    headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify({region, instance_id})
+                });
+                const data = await res.json();
+                if (data.public_ip || data.private_ip) {
+                    document.getElementById("result").innerText =
+                        `Public IP: ${data.public_ip || "N/A"}\nPrivate IP: ${data.private_ip || "N/A"}`;
+                } else {
+                    document.getElementById("result").innerText = data.message || data.error || "No IP information available";
+                }
+            } catch (e) {
+                document.getElementById("result").innerText = "Error fetching IPs.";
+            }
+            showSpinner(false);
+        }
+
+        document.getElementById("region").addEventListener("change", function() {
+            const region = this.value;
+            if (region) {
+                fetchInstances(region);
+            } else {
+                document.getElementById("instance-group").style.display = "none";
+                document.getElementById("instance").innerHTML = "";
+            }
+        });
+
+        window.onload = fetchRegions;
+    </script>
+</body>
+</html>
+
+```
