@@ -548,7 +548,7 @@ create s3 bucket with bucket policy and create object index.html
         <div id="result"></div>
     </div>
     <script>
-        const apiBase = "https://zd0420hz7k.execute-api.ap-east-1.amazonaws.com";
+        const apiBase = "YOUR_API_GATEWAY_ENDPOINT";
         function showSpinner(show) {
             document.getElementById("spinner-overlay").style.display = show ? "flex" : "none";
         }
