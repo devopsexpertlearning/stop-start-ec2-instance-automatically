@@ -163,7 +163,7 @@ To check if your cron job is running:
 ### 1. Create Lamda Function 
 Create lambda function with code and select runtime env python 3. File name should be lambda_function.py or
 
-Download full lambda zip code ref. https://devopsexpert-shared.s3.ap-south-1.amazonaws.com/lambda_deployment.zip 
+Download full lambda zip code ref. https://devopsexpert-shared.s3.ap-south-1.amazonaws.com/lambda_deployment.zip with Cognito Authentication.
 
   ```python
 import os
@@ -178,7 +178,7 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 # Flag to track if jose module is available
-jwt_validation_available = True
+jwt_validation_available = False
 
 try:
     from jose import jwk, jwt
