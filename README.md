@@ -670,3 +670,9 @@ Select create HTTP AWS API Gateway with following routes and integrate Lambda fu
 ### 3. Create S3 bucket To Host UI
 
 create s3 bucket with bucket policy and create objects index.html and callback.html
+
+### 4. Create Cloudfront Distribution
+
+Create Cloudfront Distribution with cloudfront-function.js in 'viewer-request' and origin as S3 (Set up proper bucket policy and integrate cloudfront)
+
+### 5. Test it
