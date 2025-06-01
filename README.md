@@ -164,14 +164,177 @@ To check if your cron job is running:
 Create lambda function with code and select runtime env python 3. File name should be lambda_function.py
 
   ```python
-  import os
+import os
 import json
 import logging
 import boto3
+import base64
+import time
 from botocore.exceptions import ClientError, WaiterError
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
+
+# Flag to track if jose module is available
+jwt_validation_available = True
+
+try:
+    from jose import jwk, jwt
+    from jose.utils import base64url_decode
+    import urllib.request
+    jwt_validation_available = True
+    logger.info("JWT validation is available")
+except ImportError:
+    logger.warning("JWT validation is not available - missing jose module")
+
+# Cognito configuration from environment variables
+REGION = os.environ.get('COGNITO_REGION')
+USER_POOL_ID = os.environ.get('COGNITO_USER_POOL_ID')
+APP_CLIENT_ID = os.environ.get('COGNITO_APP_CLIENT_ID')
+
+# Add validation to ensure environment variables are set
+if not REGION or not USER_POOL_ID or not APP_CLIENT_ID:
+    logger.critical("Missing required Cognito environment variables")
+    # This will cause the function to fail if env vars are missing
+    # You could also set jwt_validation_available to False instead
+
+# Global variables for caching
+jwks = None
+jwks_last_updated = 0
+
+def get_jwks():
+    """
+    Get the JSON Web Key Set (JWKS) from Cognito
+    """
+    if not jwt_validation_available:
+        return None
+    
+    global jwks, jwks_last_updated
+    
+    # Cache JWKS for 24 hours
+    if jwks is None or time.time() - jwks_last_updated > 86400:
+        try:
+            # Use the correct URL format for Cognito JWKS
+            jwks_url = f'https://cognito-idp.{REGION}.amazonaws.com/{USER_POOL_ID}/.well-known/jwks.json'
+            logger.info(f"Fetching JWKS from URL: {jwks_url}")
+            
+            with urllib.request.urlopen(jwks_url) as f:
+                jwks = json.loads(f.read().decode('utf-8'))
+                jwks_last_updated = time.time()
+                logger.info("JWKS retrieved successfully")
+        except Exception as e:
+            logger.error(f"Error retrieving JWKS: {str(e)}")
+            # Add fallback behavior - return empty JWKS
+            jwks = {"keys": []}
+            return jwks
+    
+    return jwks
+def validate_cognito_token(token):
+    """
+    Validate the Cognito JWT token
+    """
+    try:
+        # If JWT validation is not available, deny access
+        if not jwt_validation_available:
+            logger.critical("JWT validation not available - security risk!")
+            return False
+        
+        if not token:
+            logger.warning("No token provided")
+            return False
+        
+        # Remove 'Bearer ' prefix if present
+        if token.startswith('Bearer '):
+            token = token[7:]
+        
+        # Get the kid (key ID) from the token
+        headers = jwt.get_unverified_header(token)
+        kid = headers['kid']
+        
+        # Get the JWKS
+        jwks = get_jwks()
+        if not jwks or not jwks.get("keys"):
+            logger.error("Failed to retrieve JWKS or empty JWKS returned")
+            return False
+        
+        # Get the public key that matches the kid
+        public_key = None
+        for key in jwks['keys']:
+            if key['kid'] == kid:
+                public_key = key
+                break
+        
+        if not public_key:
+            logger.warning(f"Public key not found for kid: {kid}")
+            return False
+        
+        # Verify the token
+        # Get the last two sections of the token (payload and signature)
+        message, encoded_signature = token.rsplit('.', 1)
+        
+        # Decode the signature
+        decoded_signature = base64url_decode(encoded_signature.encode('utf-8'))
+        
+        # Build the public key
+        public_key = jwk.construct(public_key)
+        
+        # Verify the signature
+        if not public_key.verify(message.encode('utf-8'), decoded_signature):
+            logger.warning("Signature verification failed")
+            return False
+        
+        # Verify the claims
+        claims = jwt.get_unverified_claims(token)
+        
+        # Check token expiration
+        if time.time() > claims['exp']:
+            logger.warning("Token has expired")
+            return False
+        
+        # Verify the audience (client ID)
+        if claims.get('client_id') != APP_CLIENT_ID and claims.get('aud') != APP_CLIENT_ID:
+            client_id = claims.get('client_id', claims.get('aud', 'unknown'))
+            logger.warning(f"Token was not issued for this app: {client_id} != {APP_CLIENT_ID}")
+            return False
+        
+        # Verify the issuer
+        expected_issuer = f'https://cognito-idp.{REGION}.amazonaws.com/{USER_POOL_ID}'
+        if claims['iss'] != expected_issuer:
+            logger.warning(f"Issuer {claims['iss']} does not match {expected_issuer}")
+            return False
+        
+        # Token is valid
+        return True
+    
+    except Exception as e:
+        logger.warning(f"Token validation error: {str(e)}")
+        return False
+
+def get_user_info_from_token(token):
+    """
+    Extract user information from the token
+    """
+    if not jwt_validation_available:
+        return {"username": "unknown", "email": "unknown"}
+    
+    if not token:
+        return None
+    
+    # Remove 'Bearer ' prefix if present
+    if token.startswith('Bearer '):
+        token = token[7:]
+    
+    try:
+        # Get claims without full validation
+        claims = jwt.get_unverified_claims(token)
+        return {
+            "username": claims.get("cognito:username", claims.get("username", "unknown")),
+            "email": claims.get("email", "unknown"),
+            "exp": claims.get("exp", 0)
+        }
+    except Exception as e:
+        logger.warning(f"Error extracting user info from token: {e}")
+        return None
 
 def get_regions():
     ec2 = boto3.client("ec2")
@@ -180,20 +343,23 @@ def get_regions():
 
 def get_instances(region):
     ec2 = boto3.client("ec2", region_name=region)
-    resp = ec2.describe_instances()
+    # Add pagination to handle large number of instances
+    paginator = ec2.get_paginator('describe_instances')
     instances = []
-    for res in resp["Reservations"]:
-        for inst in res["Instances"]:
-            name = ""
-            for tag in inst.get("Tags", []):
-                if tag["Key"] == "Name":
-                    name = tag["Value"]
-            instances.append({
-                "InstanceId": inst["InstanceId"],
-                "Name": name,
-                "InstanceType": inst["InstanceType"],
-                "State": inst["State"]["Name"]
-            })
+    
+    for page in paginator.paginate():
+        for res in page["Reservations"]:
+            for inst in res["Instances"]:
+                name = ""
+                for tag in inst.get("Tags", []):
+                    if tag["Key"] == "Name":
+                        name = tag["Value"]
+                instances.append({
+                    "InstanceId": inst["InstanceId"],
+                    "Name": name,
+                    "InstanceType": inst["InstanceType"],
+                    "State": inst["State"]["Name"]
+                })
     return instances
 
 def start_instance(region, instance_id):
@@ -209,29 +375,51 @@ def wait_for_instance_running(region, instance_id, timeout=120):
     waiter = ec2.get_waiter("instance_running")
     try:
         waiter.wait(InstanceIds=[instance_id], WaiterConfig={"Delay": 5, "MaxAttempts": timeout // 5})
-    except Exception as e:
+        return True
+    except WaiterError as e:
         logger.error(f"Error waiting for instance to run: {e}")
+        return False
+    except Exception as e:
+        logger.error(f"Unexpected error waiting for instance: {e}")
+        return False
 
 def get_instance_ips(region, instance_id):
     ec2 = boto3.client("ec2", region_name=region)
     try:
+        logger.info(f"Fetching IPs for instance {instance_id} in region {region}")
         resp = ec2.describe_instances(InstanceIds=[instance_id])
+        if not resp["Reservations"] or not resp["Reservations"][0]["Instances"]:
+            logger.error(f"No instance found with ID {instance_id}")
+            return None, None
         instance = resp["Reservations"][0]["Instances"][0]
         public_ip = instance.get("PublicIpAddress")
         private_ip = instance.get("PrivateIpAddress")
+        logger.info(f"Found IPs: public={public_ip}, private={private_ip}")
         return public_ip, private_ip
+    except ClientError as e:
+        logger.error(f"AWS ClientError fetching IPs: {e}")
+        return None, None
     except Exception as e:
-        logger.error(f"Error fetching IPs: {e}")
+        logger.error(f"Unexpected error fetching IPs: {e}")
         return None, None
 
 def get_instance_state(region, instance_id):
     ec2 = boto3.client("ec2", region_name=region)
     try:
+        logger.info(f"Getting state for instance {instance_id} in region {region}")
         resp = ec2.describe_instances(InstanceIds=[instance_id])
+        if not resp["Reservations"] or not resp["Reservations"][0]["Instances"]:
+            logger.error(f"No instance found with ID {instance_id}")
+            return None
         instance = resp["Reservations"][0]["Instances"][0]
-        return instance["State"]["Name"]
+        state = instance["State"]["Name"]
+        logger.info(f"Instance state: {state}")
+        return state
+    except ClientError as e:
+        logger.error(f"AWS ClientError getting instance state: {e}")
+        return None
     except Exception as e:
-        logger.error(f"Error getting instance state: {e}")
+        logger.error(f"Unexpected error getting instance state: {e}")
         return None
 
 def lambda_handler(event, context):
@@ -244,6 +432,36 @@ def lambda_handler(event, context):
     # API Gateway V2 method is in requestContext.http.method
     http_method = event.get("requestContext", {}).get("http", {}).get("method", "GET")
     
+    # CORS headers for API Gateway V2
+    headers = {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type,Authorization",
+        "Content-Type": "application/json"
+    }
+    
+    # Handle OPTIONS request (preflight CORS)
+    if http_method == "OPTIONS":
+        return {
+            "statusCode": 200,
+            "headers": headers,
+            "body": ""
+        }
+    
+    # Get Authorization header
+    auth_header = event.get("headers", {}).get("authorization", "")
+    
+    # Skip token validation if jose module is not available
+    if jwt_validation_available:
+        # Validate token except for OPTIONS requests
+        if not validate_cognito_token(auth_header) and http_method != "OPTIONS":
+            logger.warning("Invalid token or missing authorization")
+            return {
+                "statusCode": 401,
+                "headers": headers,
+                "body": json.dumps({"error": "Unauthorized"})
+            }
+    
     params = event.get("queryStringParameters") or {}
     raw_body = event.get("body")
     is_base64 = event.get("isBase64Encoded", False)
@@ -252,38 +470,48 @@ def lambda_handler(event, context):
     body = {}
     if raw_body:
         if is_base64:
-            import base64
             raw_body = base64.b64decode(raw_body).decode('utf-8')
         
         if isinstance(raw_body, str):
             try:
                 body = json.loads(raw_body)
+                logger.info(f"Parsed body: {json.dumps(body)}")
             except Exception as e:
                 logger.error(f"Error parsing body: {e}")
+                return {
+                    "statusCode": 400,
+                    "headers": headers,
+                    "body": json.dumps({"error": f"Invalid JSON in request body: {str(e)}"})
+                }
         elif isinstance(raw_body, dict):
             body = raw_body
 
     logger.info(f"Processing API Gateway V2 request: {http_method} {path}")
-    logger.info(f"Body: {json.dumps(body)}")
     
-    # CORS headers for API Gateway V2
-    headers = {
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type,Authorization"
-    }
-
     try:
-        if path == "/regions":
+        if (path == "/verify-auth" or path == "/dev/verify-auth" or path == "/prod/verify-auth") and http_method == "GET":
+            # Simple endpoint to check authentication status
+            is_valid = validate_cognito_token(auth_header)
+            user_info = get_user_info_from_token(auth_header) if is_valid else None
+            
+            return {
+                "statusCode": 200,
+                "headers": headers,
+                "body": json.dumps({
+                    "authenticated": is_valid,
+                    "user": user_info
+                })
+            }
+        elif path == "/dev/regions" or path == "/prod/regions":
             regions = get_regions()
             return {"statusCode": 200, "headers": headers, "body": json.dumps(regions)}
-        elif path == "/instances":
+        elif path == "/dev/instances" or path == "/prod/instances":
             region = params.get("region")
             if not region:
                 return {"statusCode": 400, "body": "Missing region"}
             instances = get_instances(region)
             return {"statusCode": 200, "headers": headers, "body": json.dumps(instances)}
-        elif path == "/start" and http_method == "POST":
+        elif (path == "/start" or path == "/dev/start" or path == "/prod/start") and http_method == "POST":
             region = body.get("region")
             instance_id = body.get("instance_id")
             if not region or not instance_id:
@@ -324,7 +552,7 @@ def lambda_handler(event, context):
                     "private_ip": private_ip
                 })
             }
-        elif path == "/stop" and http_method == "POST":
+        elif (path == "/stop" or path == "/dev/stop" or path == "/prod/stop") and http_method == "POST":
             region = body.get("region")
             instance_id = body.get("instance_id")
             if not region or not instance_id:
@@ -347,25 +575,83 @@ def lambda_handler(event, context):
                 "headers": headers, 
                 "body": json.dumps({"message": "Instance stopped successfully"})
             }
-        elif path == "/get" and http_method == "POST":
+        elif (path == "/getip" or path == "/dev/getip" or path == "/prod/getip") and http_method == "POST":
+            logger.info(f"Processing getip request with body: {json.dumps(body)}")
+            
+            # Validate required parameters
             region = body.get("region")
+            if not region:
+                logger.error("Missing region parameter")
+                return {
+                    "statusCode": 400, 
+                    "headers": headers, 
+                    "body": json.dumps({"error": "Missing region parameter"})
+                }
+                
             instance_id = body.get("instance_id")
-            if not region or not instance_id:
-                return {"statusCode": 400, "body": "Missing region or instance_id"}
-            public_ip, private_ip = get_instance_ips(region, instance_id)
-            return {
-                "statusCode": 200,
-                "headers": headers,
-                "body": json.dumps({
+            if not instance_id:
+                logger.error("Missing instance_id parameter")
+                return {
+                    "statusCode": 400, 
+                    "headers": headers, 
+                    "body": json.dumps({"error": "Missing instance_id parameter"})
+                }
+            
+            logger.info(f"Fetching IP information for {instance_id} in {region}")
+            
+            try:
+                # First check if the instance exists and get its state
+                state = get_instance_state(region, instance_id)
+                if state is None:
+                    return {
+                        "statusCode": 404,
+                        "headers": headers,
+                        "body": json.dumps({"error": f"Instance {instance_id} not found in region {region}"})
+                    }
+                
+                # Get the IP addresses
+                public_ip, private_ip = get_instance_ips(region, instance_id)
+                
+                response_data = {
                     "public_ip": public_ip,
-                    "private_ip": private_ip
-                })
-            }
+                    "private_ip": private_ip,
+                    "state": state
+                }
+                
+                logger.info(f"Successfully retrieved instance data: {json.dumps(response_data)}")
+                
+                return {
+                    "statusCode": 200,
+                    "headers": headers,
+                    "body": json.dumps(response_data)
+                }
+            except ClientError as e:
+                error_code = e.response.get('Error', {}).get('Code', 'Unknown')
+                error_msg = e.response.get('Error', {}).get('Message', str(e))
+                logger.error(f"AWS ClientError in getip: {error_code} - {error_msg}")
+                return {
+                    "statusCode": 400,
+                    "headers": headers,
+                    "body": json.dumps({"error": f"AWS Error: {error_msg}"})
+                }
+            except Exception as e:
+                logger.error(f"Error in getip: {str(e)}", exc_info=True)
+                return {
+                    "statusCode": 500,
+                    "headers": headers,
+                    "body": json.dumps({"error": f"Internal server error: {str(e)}"})
+                }
+        
         else:
             return {"statusCode": 404, "headers": headers, "body": json.dumps({"error": f"Not found: {path}"})}
     except Exception as e:
-        logger.error(f"Error: {e}")
-        return {"statusCode": 500, "headers": headers, "body": json.dumps({"error": str(e)})}
+        logger.error(f"Unhandled error in lambda_handler: {str(e)}", exc_info=True)
+        return {
+            "statusCode": 500, 
+            "headers": headers, 
+            "body": json.dumps({"error": f"Internal server error: {str(e)}"})
+        }
+
   ```
 #### Note: During lambda creation you need to create Role which should have access on EC2, cloudwatch logs.
 
@@ -381,368 +667,4 @@ Select create HTTP AWS API Gateway with following routes and integrate Lambda fu
   
 ### 3. Create S3 bucket To Host UI
 
-create s3 bucket with bucket policy and create object index.html
-
-```html
-<!DOCTYPE html>
-<html>
-<head>
-    <title>EC2 Control Panel</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <style>
-        body {
-            background: linear-gradient(135deg, #232526 0%, #ff9966 100%);
-            min-height: 100vh;
-            margin: 0;
-            font-family: 'Segoe UI', Arial, sans-serif;
-            color: #fff;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-        .container {
-            background: rgba(30, 30, 40, 0.45);
-            border-radius: 22px;
-            box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.25);
-            padding: 2.5rem 2rem 2rem 2rem;
-            max-width: 420px;
-            width: 100%;
-            text-align: center;
-            color: #fff;
-            backdrop-filter: blur(12px);
-            border: 1.5px solid rgba(255, 255, 255, 0.18);
-        }
-        h2 {
-            margin-bottom: 1.5rem;
-            color: #ff9966;
-            letter-spacing: 1px;
-            font-weight: 800;
-            font-family: 'Segoe UI', 'Fira Mono', 'Consolas', monospace;
-            text-shadow: 0 2px 8px #23252644;
-        }
-        label {
-            display: block;
-            margin: 1.2rem 0 0.5rem 0;
-            font-size: 1.1rem;
-            color: #ff5e62;
-            font-weight: 600;
-            letter-spacing: 0.5px;
-        }
-        select {
-            width: 90%;
-            padding: 0.6rem;
-            border-radius: 8px;
-            border: none;
-            margin-bottom: 0.8rem;
-            font-size: 1rem;
-            background: rgba(255,255,255,0.85);
-            color: #ff5e62;
-            font-weight: 700;
-            box-shadow: 0 2px 8px rgba(255, 94, 98, 0.08);
-            outline: none;
-            transition: box-shadow 0.2s, background 0.2s;
-        }
-        select:focus {
-            box-shadow: 0 0 0 2px #ff9966;
-            background: #fff;
-        }
-        button {
-            background: linear-gradient(90deg, #ff9966 0%, #ff5e62 100%);
-            color: #fff;
-            border: none;
-            border-radius: 8px;
-            padding: 0.7rem 1.5rem;
-            margin: 0.5rem 0.3rem;
-            font-size: 1rem;
-            font-weight: 700;
-            cursor: pointer;
-            box-shadow: 0 2px 8px rgba(255, 94, 98, 0.12);
-            transition: background 0.2s, transform 0.2s;
-            letter-spacing: 0.5px;
-        }
-        button:hover {
-            background: linear-gradient(90deg, #ff5e62 0%, #ff9966 100%);
-            transform: translateY(-2px) scale(1.04);
-        }
-        #result {
-            margin-top: 1.5rem;
-            background: rgba(255, 255, 255, 0.10);
-            border-radius: 8px;
-            padding: 1rem;
-            color: #fff;
-            font-size: 1.05rem;
-            min-height: 2.2rem;
-            word-break: break-all;
-            font-family: 'Fira Mono', 'Consolas', monospace;
-            letter-spacing: 0.5px;
-        }
-        .spinner-overlay {
-            position: fixed;
-            top: 0; left: 0; right: 0; bottom: 0;
-            background: rgba(255, 153, 102, 0.12);
-            z-index: 1000;
-            display: none;
-            align-items: center;
-            justify-content: center;
-        }
-        .spinner {
-            border: 6px solid #fff;
-            border-top: 6px solid #ff5e62;
-            border-radius: 50%;
-            width: 48px;
-            height: 48px;
-            animation: spin 1s linear infinite;
-            margin: auto;
-        }
-        @keyframes spin {
-            0% { transform: rotate(0deg);}
-            100% { transform: rotate(360deg);}
-        }
-        #instance-group {
-            display: none;
-        }
-        @media (max-width: 500px) {
-            .container {
-                padding: 1.2rem 0.5rem 1rem 0.5rem;
-                max-width: 98vw;
-            }
-            h2 {
-                font-size: 1.2rem;
-            }
-            button {
-                width: 90%;
-                margin: 0.5rem 0;
-            }
-        }
-        /* DevOps accent bar */
-        .accent-bar {
-            width: 60px;
-            height: 6px;
-            border-radius: 3px;
-            margin: 0 auto 1.5rem auto;
-            background: linear-gradient(90deg, #ff9966 0%, #ff5e62 100%);
-            box-shadow: 0 2px 8px #ff5e6244;
-        }
-    </style>
-</head>
-<body>
-    <div class="spinner-overlay" id="spinner-overlay">
-        <div class="spinner"></div>
-    </div>
-    <div class="container">
-        <div class="accent-bar"></div>
-        <h2>EC2 Instance Control</h2>
-        <label for="region">Region:</label>
-        <select id="region">
-            <option value="">Select region</option>
-        </select>
-        <div id="instance-group" style="display:none;">
-            <label for="instance">Instance:</label>
-            <select id="instance"></select>
-        </div>
-        <div>
-            <button onclick="startInstance()">Start</button>
-            <button onclick="stopInstance()">Stop</button>
-            <button onclick="getIPs()">Get IPs</button>
-        </div>
-        <div id="result"></div>
-    </div>
-    <script>
-        const apiBase = "YOUR_API_GATEWAY_ENDPOINT";
-        function showSpinner(show) {
-            document.getElementById("spinner-overlay").style.display = show ? "flex" : "none";
-        }
-
-        async function fetchRegions() {
-            showSpinner(true);
-            const sel = document.getElementById("region");
-            sel.innerHTML = '<option value="">Select region</option>';
-            document.getElementById("instance-group").style.display = "none";
-            document.getElementById("result").innerText = ""; 
-            
-            try {
-                const res = await fetch(apiBase + "/regions");
-                const rawData = await res.text();
-                
-                // Parse the response based on what we received
-                let regions = [];
-                try {
-                    const data = JSON.parse(rawData);
-                    if (Array.isArray(data)) {
-                        regions = data;
-                    } else if (data && data.body) {
-                        if (typeof data.body === 'string') {
-                            regions = JSON.parse(data.body);
-                        } else if (Array.isArray(data.body)) {
-                            regions = data.body;
-                        }
-                    }
-                } catch (e) {
-                    // Silent error handling
-                }
-                
-                // Sort regions alphabetically
-                regions.sort();
-                
-                regions.forEach(r => {
-                    const opt = document.createElement("option");
-                    opt.value = r;
-                    opt.text = r;
-                    sel.appendChild(opt);
-                });
-            } catch (e) {
-                sel.innerHTML = '<option value="">Error loading regions</option>';
-            }
-            showSpinner(false);
-        }
-
-        async function fetchInstances(region) {
-            const sel = document.getElementById("instance");
-            const group = document.getElementById("instance-group");
-            sel.innerHTML = "<option>Loading...</option>";
-            group.style.display = "none";
-            if (!region) {
-                sel.innerHTML = "";
-                return;
-            }
-            showSpinner(true);
-            try {
-                const res = await fetch(apiBase + "/instances?region=" + encodeURIComponent(region));
-                const rawData = await res.text();
-                
-                // Parse the response based on what we received
-                let instances = [];
-                try {
-                    const data = JSON.parse(rawData);
-                    if (Array.isArray(data)) {
-                        instances = data;
-                    } else if (data && data.body) {
-                        if (typeof data.body === 'string') {
-                            instances = JSON.parse(data.body);
-                        } else if (Array.isArray(data.body)) {
-                            instances = data.body;
-                        }
-                    }
-                } catch (e) {
-                    // Silent error handling
-                }
-                
-                sel.innerHTML = "";
-                if (instances.length === 0) {
-                    sel.innerHTML = "<option>No instances found</option>";
-                } else {
-                    instances.forEach(i => {
-                        const opt = document.createElement("option");
-                        opt.value = i.InstanceId;
-                        opt.text = `${i.InstanceId} - ${i.InstanceType} ${i.Name ? `(${i.Name})` : ''} [${i.State}]`;
-                        sel.appendChild(opt);
-                    });
-                }
-                group.style.display = "block";
-            } catch (e) {
-                sel.innerHTML = "<option>Error loading instances</option>";
-            }
-            showSpinner(false);
-        }
-
-        async function startInstance() {
-            showSpinner(true);
-            document.getElementById("result").innerText = "Starting instance...";
-            const region = document.getElementById("region").value;
-            const instance_id = document.getElementById("instance").value;
-            if (!region || !instance_id) {
-                document.getElementById("result").innerText = "Please select region and instance.";
-                showSpinner(false);
-                return;
-            }
-            try {
-                const res = await fetch(apiBase + "/start", {
-                    method: "POST",
-                    headers: {"Content-Type": "application/json"},
-                    body: JSON.stringify({region, instance_id})
-                });
-                const data = await res.json();
-                let resultText = data.message || "Unknown response";
-                
-                // Add IP information if available
-                if (data.public_ip || data.private_ip) {
-                    resultText += `\nPublic IP: ${data.public_ip || "N/A"}`;
-                    resultText += `\nPrivate IP: ${data.private_ip || "N/A"}`;
-                }
-                
-                document.getElementById("result").innerText = resultText;
-            } catch (e) {
-                document.getElementById("result").innerText = "Error starting instance.";
-            }
-            showSpinner(false);
-        }
-
-        async function stopInstance() {
-            showSpinner(true);
-            document.getElementById("result").innerText = "Stopping instance...";
-            const region = document.getElementById("region").value;
-            const instance_id = document.getElementById("instance").value;
-            if (!region || !instance_id) {
-                document.getElementById("result").innerText = "Please select region and instance.";
-                showSpinner(false);
-                return;
-            }
-            try {
-                const res = await fetch(apiBase + "/stop", {
-                    method: "POST",
-                    headers: {"Content-Type": "application/json"},
-                    body: JSON.stringify({region, instance_id})
-                });
-                const data = await res.json();
-                document.getElementById("result").innerText = data.message || data.error || "Unknown response";
-            } catch (e) {
-                document.getElementById("result").innerText = "Error stopping instance.";
-            }
-            showSpinner(false);
-        }
-
-        async function getIPs() {
-            showSpinner(true);
-            document.getElementById("result").innerText = "Fetching IP addresses...";
-            const region = document.getElementById("region").value;
-            const instance_id = document.getElementById("instance").value;
-            if (!region || !instance_id) {
-                document.getElementById("result").innerText = "Please select region and instance.";
-                showSpinner(false);
-                return;
-            }
-            try {
-                const res = await fetch(apiBase + "/get", {
-                    method: "POST",
-                    headers: {"Content-Type": "application/json"},
-                    body: JSON.stringify({region, instance_id})
-                });
-                const data = await res.json();
-                if (data.public_ip || data.private_ip) {
-                    document.getElementById("result").innerText =
-                        `Public IP: ${data.public_ip || "N/A"}\nPrivate IP: ${data.private_ip || "N/A"}`;
-                } else {
-                    document.getElementById("result").innerText = data.message || data.error || "No IP information available";
-                }
-            } catch (e) {
-                document.getElementById("result").innerText = "Error fetching IPs.";
-            }
-            showSpinner(false);
-        }
-
-        document.getElementById("region").addEventListener("change", function() {
-            const region = this.value;
-            if (region) {
-                fetchInstances(region);
-            } else {
-                document.getElementById("instance-group").style.display = "none";
-                document.getElementById("instance").innerHTML = "";
-            }
-        });
-
-        window.onload = fetchRegions;
-    </script>
-</body>
-</html>
-
-```
+create s3 bucket with bucket policy and create objects index.html and callback.html
