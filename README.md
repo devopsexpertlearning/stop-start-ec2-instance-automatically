@@ -161,7 +161,7 @@ To check if your cron job is running:
 ## Setup Instructions
 
 ### 1. Create Lamda Function 
-Create lambda function with code and select runtime env python 3. File name should be lambda_function.py or
+Create lambda function with code and select runtime env python3. File name should be lambda_function.py or
 
 Download full lambda zip code ref. https://devopsexpert-shared.s3.ap-south-1.amazonaws.com/lambda_deployment.zip with Cognito Authentication.
 
