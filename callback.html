@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Authentication Callback</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body {
+            background: linear-gradient(135deg, #232526 0%, #ff9966 100%);
+            min-height: 100vh;
+            margin: 0;
+            font-family: 'Segoe UI', Arial, sans-serif;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .container {
+            background: rgba(30, 30, 40, 0.45);
+            border-radius: 22px;
+            box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.25);
+            padding: 2.5rem 2rem 2rem 2rem;
+            max-width: 420px;
+            width: 100%;
+            text-align: center;
+            color: #fff;
+            backdrop-filter: blur(12px);
+            border: 1.5px solid rgba(255, 255, 255, 0.18);
+        }
+        h2 {
+            margin-bottom: 1.5rem;
+            color: #ff9966;
+            letter-spacing: 1px;
+            font-weight: 800;
+            font-family: 'Segoe UI', 'Fira Mono', 'Consolas', monospace;
+            text-shadow: 0 2px 8px #23252644;
+        }
+        .spinner {
+            border: 6px solid #fff;
+            border-top: 6px solid #ff5e62;
+            border-radius: 50%;
+            width: 48px;
+            height: 48px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg);}
+            100% { transform: rotate(360deg);}
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>Authenticating...</h2>
+        <div class="spinner"></div>
+    </div>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // Parse the hash fragment to extract tokens
+            const hash = window.location.hash.substring(1);
+            const params = new URLSearchParams(hash);
+            
+            // Get tokens
+            const idToken = params.get('id_token');
+            const accessToken = params.get('access_token');
+            
+            if (idToken && accessToken) {
+                // Extract token expiration time from JWT payload
+                try {
+                    const payload = idToken.split('.')[1];
+                    const decodedPayload = JSON.parse(atob(payload));
+                    const expiryTime = decodedPayload.exp * 1000; // Convert to milliseconds
+                    
+                    // Store tokens in localStorage with expiration
+                    localStorage.setItem('id_token', idToken);
+                    localStorage.setItem('access_token', accessToken);
+                    localStorage.setItem('token_expiry', expiryTime.toString());
+                    
+                    console.log("Authentication successful, tokens stored");
+                } catch (e) {
+                    console.error("Error parsing token payload:", e);
+                    localStorage.setItem('id_token', idToken);
+                    localStorage.setItem('access_token', accessToken);
+                }
+                
+                // Set cookies for CloudFront function to detect
+                document.cookie = `CognitoIdentityServiceProvider.idToken=${idToken}; path=/; max-age=${60*60*24*7}; secure; domain=${window.location.hostname}`;
+                document.cookie = `CognitoIdentityServiceProvider.accessToken=${accessToken}; path=/; max-age=${60*60*24*7}; secure; domain=${window.location.hostname}`;
+                
+                // Redirect to the main application with a clean URL
+                console.log("Redirecting to home page...");
+                setTimeout(function() {
+                    window.location.href = '/index.html';
+                }, 1000);
+            } else {
+                console.error("No tokens found in URL hash");
+                alert('Authentication failed. No tokens received.');
+                window.location.href = '/';
+            }
+        });
+    </script>
+</body>
+</html>
