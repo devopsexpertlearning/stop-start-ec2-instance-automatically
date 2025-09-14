@@ -1340,12 +1340,13 @@ If you hit YOUR_URL then you will land on cognito window
 
 After Login
 
-<img width="1902" height="526" alt="home-page" src="https://github.com/user-attachments/assets/277bc4ac-0c62-4711-b593-5f41df2e8fd3" />
+<img width="1727" height="953" alt="home-page" src="https://github.com/user-attachments/assets/642617aa-b8ed-4ee5-85ae-6e810720f1fa" />
 
 Control Plane
 
 <img width="1873" height="929" alt="homepage-two" src="https://github.com/user-attachments/assets/f56c03de-a491-4fff-bdc1-a7adebcf7c91" />
 
+Perform Action
 <img width="1894" height="955" alt="homepage-three" src="https://github.com/user-attachments/assets/c2d99ec4-4f6b-40a0-9df4-7abef265042e" />
 
 
