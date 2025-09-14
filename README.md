@@ -21,7 +21,8 @@ Create or use an existing IAM role with the following permission and attach it t
 ```json
 {
   "Effect": "Allow",
-  "Action": "ec2:StopInstances",
+  "Action": [ "ec2:StopInstances",
+              "ec2:StartInstances"
   "Resource": "*"
 }
 ```
