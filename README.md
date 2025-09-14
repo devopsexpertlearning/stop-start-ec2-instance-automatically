@@ -1,6 +1,6 @@
-# stop-ec2-instance-automatically
+# start/stop ec2 instance from UI (Below are Steps to set up UI)
 
-This repository provides a solution to automatically stop an AWS EC2 instance when it is idle, and start it again when required.
+This repository provides a solution to automatically stop an AWS EC2 instance when it is idle, and start it again when required by using UI.
 
 ## Overview
 
@@ -12,7 +12,7 @@ The provided shell script checks for recent activity in a specified log file. If
 - An IAM role attached to the EC2 instance with permission to stop the instance.
 - AWS CLI installed and configured on the EC2 instance.
 
-## Setup Instructions
+## Setup Instructions to stop EC2 (install bash script in EC2 and stop from cronjob)
 
 ### 1. Attach IAM Role
 
@@ -158,9 +158,7 @@ To check if your cron job is running:
 
 ---
 
-# start-ec2-instance-automatically from UI (Below are Steps to set up UI)
-
-## Setup Instructions
+## Setup UI Instructions with Cognito
 
 ### 1. Create Lamda Function 
 Create lambda function with code and select runtime env python3. File name should be lambda_function.py or
