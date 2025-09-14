@@ -671,12 +671,12 @@ Select create HTTP AWS API Gateway with following routes and integrate Lambda fu
 
 create s3 bucket with bucket policy (only cloudfront can access) and create objects index.html and callback.html 
 
-####In index.html, callback.html and cloudfront-function.js you need to replace below value
+In index.html, callback.html and cloudfront-function.js you need to replace below value
 - YOUR_COGNITO_LOGIN_URL (COGNITO URL - you will find in AWS)
 - CLIENT_ID (Cognito Client ID)
 - YOUR_URL (Your frontend url)
 
-####index.html
+index.html
 
 ```html
 <!DOCTYPE html>
