@@ -1,4 +1,4 @@
-# start/stop ec2 instance from UI (Below are Steps to set up UI)
+# Start/Stop EC2 Instance From UI (Below are steps to setup UI)
 
 This repository provides a solution to automatically stop an AWS EC2 instance when it is idle, and start it again when required by using UI.
 
