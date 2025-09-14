@@ -158,7 +158,7 @@ To check if your cron job is running:
 
 ---
 
-# start-ec2-instance-automatically
+# start-ec2-instance-automatically from UI (Below are Steps to set up UI)
 
 ## Setup Instructions
 
