@@ -669,10 +669,685 @@ Select create HTTP AWS API Gateway with following routes and integrate Lambda fu
   
 ### 3. Create S3 bucket To Host UI
 
-create s3 bucket with bucket policy and create objects index.html and callback.html
+create s3 bucket with bucket policy (only cloudfront can access) and create objects index.html and callback.html 
+
+In index.html you need to replace below value
+- YOUR_COGNITO_LOGIN_URL (COGNITO URL - you will find in AWS)
+- CLIENT_ID (Cognito Client ID)
+- YOUR_URL (Your frontend url)
+
+####index.html
+
+```html
+<!DOCTYPE html>
+<html>
+<head>
+    <title>EC2 Control Panel</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body {
+            background: linear-gradient(135deg, #232526 0%, #ff9966 100%);
+            min-height: 100vh;
+            margin: 0;
+            font-family: 'Segoe UI', Arial, sans-serif;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .container {
+            background: rgba(30, 30, 40, 0.45);
+            border-radius: 22px;
+            box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.25);
+            padding: 2.5rem 2rem 2rem 2rem;
+            max-width: 420px;
+            width: 100%;
+            text-align: center;
+            color: #fff;
+            backdrop-filter: blur(12px);
+            border: 1.5px solid rgba(255, 255, 255, 0.18);
+        }
+        h2 {
+            margin-bottom: 1.5rem;
+            color: #ff9966;
+            letter-spacing: 1px;
+            font-weight: 800;
+            font-family: 'Segoe UI', 'Fira Mono', 'Consolas', monospace;
+            text-shadow: 0 2px 8px #23252644;
+        }
+        label {
+            display: block;
+            margin: 1.2rem 0 0.5rem 0;
+            font-size: 1.1rem;
+            color: #ff5e62;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+        }
+        select {
+            width: 90%;
+            padding: 0.6rem;
+            border-radius: 8px;
+            border: none;
+            margin-bottom: 0.8rem;
+            font-size: 1rem;
+            background: rgba(255,255,255,0.85);
+            color: #ff5e62;
+            font-weight: 700;
+            box-shadow: 0 2px 8px rgba(255, 94, 98, 0.08);
+            outline: none;
+            transition: box-shadow 0.2s, background 0.2s;
+        }
+        select:focus {
+            box-shadow: 0 0 0 2px #ff9966;
+            background: #fff;
+        }
+        button {
+            background: linear-gradient(90deg, #ff9966 0%, #ff5e62 100%);
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            padding: 0.7rem 1.5rem;
+            margin: 0.5rem 0.3rem;
+            font-size: 1rem;
+            font-weight: 700;
+            cursor: pointer;
+            box-shadow: 0 2px 8px rgba(255, 94, 98, 0.12);
+            transition: background 0.2s, transform 0.2s;
+            letter-spacing: 0.5px;
+        }
+        button:hover {
+            background: linear-gradient(90deg, #ff5e62 0%, #ff9966 100%);
+            transform: translateY(-2px) scale(1.04);
+        }
+        #result {
+            margin-top: 1.5rem;
+            background: rgba(255, 255, 255, 0.10);
+            border-radius: 8px;
+            padding: 1rem;
+            color: #fff;
+            font-size: 1.05rem;
+            min-height: 2.2rem;
+            word-break: break-all;
+            font-family: 'Fira Mono', 'Consolas', monospace;
+            letter-spacing: 0.5px;
+        }
+        .spinner-overlay {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(255, 153, 102, 0.12);
+            z-index: 1000;
+            display: none;
+            align-items: center;
+            justify-content: center;
+        }
+        .spinner {
+            border: 6px solid #fff;
+            border-top: 6px solid #ff5e62;
+            border-radius: 50%;
+            width: 48px;
+            height: 48px;
+            animation: spin 1s linear infinite;
+            margin: auto;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg);}
+            100% { transform: rotate(360deg);}
+        }
+        #instance-group {
+            display: none;
+        }
+        @media (max-width: 500px) {
+            .container {
+                padding: 1.2rem 0.5rem 1rem 0.5rem;
+                max-width: 98vw;
+            }
+            h2 {
+                font-size: 1.2rem;
+            }
+            button {
+                width: 90%;
+                margin: 0.5rem 0;
+            }
+        }
+        /* DevOps accent bar */
+        .accent-bar {
+            width: 60px;
+            height: 6px;
+            border-radius: 3px;
+            margin: 0 auto 1.5rem auto;
+            background: linear-gradient(90deg, #ff9966 0%, #ff5e62 100%);
+            box-shadow: 0 2px 8px #ff5e6244;
+        }
+        
+        /* Sign out button */
+        .user-controls {
+            position: absolute;
+            top: 15px;
+            right: 15px;
+            display: flex;
+            align-items: center;
+        }
+        
+        .sign-out-btn {
+            background: rgba(255, 255, 255, 0.2);
+            color: #fff;
+            border: none;
+            border-radius: 6px;
+            padding: 6px 12px;
+            font-size: 0.9rem;
+            cursor: pointer;
+            transition: background 0.2s, transform 0.2s;
+        }
+        
+        .sign-out-btn:hover {
+            background: rgba(255, 255, 255, 0.3);
+            transform: translateY(-2px);
+        }
+        
+        @media (max-width: 500px) {
+            .user-controls {
+                top: 10px;
+                right: 10px;
+            }
+            
+            .sign-out-btn {
+                font-size: 0.8rem;
+                padding: 4px 8px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="spinner-overlay" id="spinner-overlay">
+        <div class="spinner"></div>
+    </div>
+    
+    <div class="user-controls">
+        <button class="sign-out-btn" onclick="signOut()">Sign Out</button>
+    </div>
+    
+    <div class="container">
+        <div class="accent-bar"></div>
+        <h2>EC2 Instance Control</h2>
+        <label for="region">Region:</label>
+        <select id="region">
+            <option value="">Select region</option>
+        </select>
+        <div id="instance-group" style="display:none;">
+            <label for="instance">Instance:</label>
+            <select id="instance"></select>
+        </div>
+        <div>
+            <button onclick="startInstance()">Start</button>
+            <button onclick="stopInstance()">Stop</button>
+            <button onclick="getIPs()">Get IPs</button>
+        </div>
+        <div id="result"></div>
+    </div>
+    <script>
+        const apiBase = "YOUR_API_ENDPOINT";
+        let idToken = null;
+        let tokenExpiration = null;
+        
+        // Get authentication token from localStorage
+        function getAuthToken() {
+            const token = localStorage.getItem('id_token');
+            const expiry = localStorage.getItem('token_expiry');
+            
+            // Check if token is expired
+            if (token && expiry) {
+                const expiryTime = parseInt(expiry);
+                // If token expires in less than 5 minutes, consider it expired
+                if (Date.now() >= expiryTime - (5 * 60 * 1000)) {
+                    console.log("Token expired or about to expire, clearing authentication");
+                    localStorage.removeItem('id_token');
+                    localStorage.removeItem('access_token');
+                    localStorage.removeItem('token_expiry');
+                    return null;
+                }
+            }
+            
+            return token;
+        }
+        
+        function showSpinner(show) {
+            document.getElementById("spinner-overlay").style.display = show ? "flex" : "none";
+        }
+
+        // Check if the user is authenticated
+        function checkAuthentication() {
+            idToken = getAuthToken();
+            if (!idToken) {
+                document.getElementById("result").innerText = "Authentication required. Redirecting...";
+                // Redirect to Cognito login
+                window.location.href = "https://YOUR_COGNITO_LOGIN_URL/login?" +
+                    "client_id=CLIENT_ID&" +
+                    "response_type=token&" +
+                    "scope=email+openid+profile&" +
+                    "redirect_uri=https://YOUR_URL/callback.html";
+                return false;
+            }
+            return true;
+        }
+
+        async function fetchRegions() {
+            if (!checkAuthentication()) return;
+            
+            showSpinner(true);
+            const sel = document.getElementById("region");
+            sel.innerHTML = '<option value="">Select region</option>';
+            document.getElementById("instance-group").style.display = "none";
+            document.getElementById("result").innerText = ""; 
+            
+            try {
+                const res = await fetch(apiBase + "/regions", {
+                    headers: {
+                        "Authorization": `Bearer ${idToken}`
+                    }
+                });
+                const rawData = await res.text();
+                
+                // Parse the response based on what we received
+                let regions = [];
+                try {
+                    const data = JSON.parse(rawData);
+                    if (Array.isArray(data)) {
+                        regions = data;
+                    } else if (data && data.body) {
+                        if (typeof data.body === 'string') {
+                            regions = JSON.parse(data.body);
+                        } else if (Array.isArray(data.body)) {
+                            regions = data.body;
+                        }
+                    }
+                } catch (e) {
+                    // Silent error handling
+                }
+                
+                // Sort regions alphabetically
+                regions.sort();
+                
+                regions.forEach(r => {
+                    const opt = document.createElement("option");
+                    opt.value = r;
+                    opt.text = r;
+                    sel.appendChild(opt);
+                });
+            } catch (e) {
+                sel.innerHTML = '<option value="">Error loading regions</option>';
+                document.getElementById("result").innerText = "Error connecting to API. Please check your authentication.";
+            }
+            showSpinner(false);
+        }
+
+        async function fetchInstances(region) {
+            if (!checkAuthentication()) return;
+            
+            const sel = document.getElementById("instance");
+            const group = document.getElementById("instance-group");
+            sel.innerHTML = "<option>Loading...</option>";
+            group.style.display = "none";
+            if (!region) {
+                sel.innerHTML = "";
+                return;
+            }
+            showSpinner(true);
+            try {
+                const res = await fetch(apiBase + "/instances?region=" + encodeURIComponent(region), {
+                    headers: {
+                        "Authorization": `Bearer ${idToken}`
+                    }
+                });
+                const rawData = await res.text();
+                
+                // Parse the response based on what we received
+                let instances = [];
+                try {
+                    const data = JSON.parse(rawData);
+                    if (Array.isArray(data)) {
+                        instances = data;
+                    } else if (data && data.body) {
+                        if (typeof data.body === 'string') {
+                            instances = JSON.parse(data.body);
+                        } else if (Array.isArray(data.body)) {
+                            instances = data.body;
+                        }
+                    }
+                } catch (e) {
+                    // Silent error handling
+                }
+                
+                sel.innerHTML = "";
+                if (instances.length === 0) {
+                    sel.innerHTML = "<option>No instances found</option>";
+                } else {
+                    instances.forEach(i => {
+                        const opt = document.createElement("option");
+                        opt.value = i.InstanceId;
+                        opt.text = `${i.InstanceId} - ${i.InstanceType} ${i.Name ? `(${i.Name})` : ''} [${i.State}]`;
+                        sel.appendChild(opt);
+                    });
+                }
+                group.style.display = "block";
+            } catch (e) {
+                sel.innerHTML = "<option>Error loading instances</option>";
+                document.getElementById("result").innerText = "Error connecting to API. Please check your authentication.";
+            }
+            showSpinner(false);
+        }
+
+        async function startInstance() {
+            if (!checkAuthentication()) return;
+            
+            showSpinner(true);
+            document.getElementById("result").innerText = "Starting instance...";
+            const region = document.getElementById("region").value;
+            const instance_id = document.getElementById("instance").value;
+            if (!region || !instance_id) {
+                document.getElementById("result").innerText = "Please select region and instance.";
+                showSpinner(false);
+                return;
+            }
+            try {
+                const res = await fetch(apiBase + "/start", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "Authorization": `Bearer ${idToken}`
+                    },
+                    body: JSON.stringify({region, instance_id})
+                });
+                const data = await res.json();
+                let resultText = data.message || "Unknown response";
+                
+                // Add IP information if available
+                if (data.public_ip || data.private_ip) {
+                    resultText += `\nPublic IP: ${data.public_ip || "N/A"}`;
+                    resultText += `\nPrivate IP: ${data.private_ip || "N/A"}`;
+                }
+                
+                document.getElementById("result").innerText = resultText;
+            } catch (e) {
+                document.getElementById("result").innerText = "Error starting instance. Please check your authentication.";
+            }
+            showSpinner(false);
+        }
+
+        async function stopInstance() {
+            if (!checkAuthentication()) return;
+            
+            showSpinner(true);
+            document.getElementById("result").innerText = "Stopping instance...";
+            const region = document.getElementById("region").value;
+            const instance_id = document.getElementById("instance").value;
+            if (!region || !instance_id) {
+                document.getElementById("result").innerText = "Please select region and instance.";
+                showSpinner(false);
+                return;
+            }
+            try {
+                const res = await fetch(apiBase + "/stop", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "Authorization": `Bearer ${idToken}`
+                    },
+                    body: JSON.stringify({region, instance_id})
+                });
+                const data = await res.json();
+                document.getElementById("result").innerText = data.message || data.error || "Unknown response";
+            } catch (e) {
+                document.getElementById("result").innerText = "Error stopping instance. Please check your authentication.";
+            }
+            showSpinner(false);
+        }
+
+        async function getIPs() {
+            if (!checkAuthentication()) return;
+            
+            showSpinner(true);
+            document.getElementById("result").innerText = "Fetching IP addresses...";
+            const region = document.getElementById("region").value;
+            const instance_id = document.getElementById("instance").value;
+            if (!region || !instance_id) {
+                document.getElementById("result").innerText = "Please select region and instance.";
+                showSpinner(false);
+                return;
+            }
+            
+            const payload = {region, instance_id};
+            console.log("Sending payload to /getip:", payload);
+            
+            try {
+                const res = await fetch(apiBase + "/getip", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "Authorization": `Bearer ${idToken}`
+                    },
+                    body: JSON.stringify(payload)
+                });
+                
+                if (!res.ok) {
+                    const errorText = await res.text();
+                    console.error(`Error response (${res.status}):`, errorText);
+                    document.getElementById("result").innerText = 
+                        `Error fetching IPs: Server returned ${res.status} ${res.statusText}`;
+                    showSpinner(false);
+                    return;
+                }
+                
+                const responseText = await res.text();
+                console.log("Raw response:", responseText);
+                
+                let data;
+                try {
+                    data = JSON.parse(responseText);
+                } catch (parseError) {
+                    console.error("JSON parse error:", parseError);
+                    document.getElementById("result").innerText = 
+                        "Error: Invalid response format from server";
+                    showSpinner(false);
+                    return;
+                }
+                
+                if (data.public_ip || data.private_ip || data.state) {
+                    let resultText = "";
+                    if (data.state) {
+                        resultText += `Instance State: ${data.state}\n`;
+                    }
+                    resultText += `Public IP: ${data.public_ip || "N/A"}\n`;
+                    resultText += `Private IP: ${data.private_ip || "N/A"}`;
+                    document.getElementById("result").innerText = resultText;
+                } else if (data.error) {
+                    document.getElementById("result").innerText = `Error: ${data.error}`;
+                } else {
+                    document.getElementById("result").innerText = "No IP information available";
+                }
+            } catch (e) {
+                console.error("Fetch error:", e);
+                document.getElementById("result").innerText = 
+                    `Error fetching IPs: ${e.message || "Unknown error"}`;
+            }
+            showSpinner(false);
+        }
+
+        // Sign out function
+        function signOut() {
+            // Clear local storage tokens
+            localStorage.removeItem('id_token');
+            localStorage.removeItem('access_token');
+            localStorage.removeItem('token_expiry');
+            
+            // Clear cookies
+            document.cookie = "CognitoIdentityServiceProvider.idToken=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; secure; domain=" + window.location.hostname;
+            document.cookie = "CognitoIdentityServiceProvider.accessToken=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; secure; domain=" + window.location.hostname;
+            
+            // Reset token variables
+            idToken = null;
+            tokenExpiration = null;
+            
+            // Show message
+            document.getElementById("result").innerText = "You have been signed out. Redirecting...";
+            
+            // Redirect to Cognito logout endpoint
+            setTimeout(function() {
+                window.location.href = "https://COGNITO_LOGOUT_URL/logout?" +
+                    "client_id=CLIENT_ID&" +
+                    "logout_uri=" + encodeURIComponent(window.location.origin);
+            }, 1000);
+        }
+        
+        document.getElementById("region").addEventListener("change", function() {
+            const region = this.value;
+            if (region) {
+                fetchInstances(region);
+            } else {
+                document.getElementById("instance-group").style.display = "none";
+                document.getElementById("instance").innerHTML = "";
+            }
+        });
+
+        window.onload = function() {
+            // Check authentication before loading
+            if (checkAuthentication()) {
+                fetchRegions();
+            }
+        };
+    </script>
+</body>
+</html>
+```
+####Callback.html
+
+```html
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Authentication Callback</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body {
+            background: linear-gradient(135deg, #232526 0%, #ff9966 100%);
+            min-height: 100vh;
+            margin: 0;
+            font-family: 'Segoe UI', Arial, sans-serif;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .container {
+            background: rgba(30, 30, 40, 0.45);
+            border-radius: 22px;
+            box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.25);
+            padding: 2.5rem 2rem 2rem 2rem;
+            max-width: 420px;
+            width: 100%;
+            text-align: center;
+            color: #fff;
+            backdrop-filter: blur(12px);
+            border: 1.5px solid rgba(255, 255, 255, 0.18);
+        }
+        h2 {
+            margin-bottom: 1.5rem;
+            color: #ff9966;
+            letter-spacing: 1px;
+            font-weight: 800;
+            font-family: 'Segoe UI', 'Fira Mono', 'Consolas', monospace;
+            text-shadow: 0 2px 8px #23252644;
+        }
+        .spinner {
+            border: 6px solid #fff;
+            border-top: 6px solid #ff5e62;
+            border-radius: 50%;
+            width: 48px;
+            height: 48px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg);}
+            100% { transform: rotate(360deg);}
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>Authenticating...</h2>
+        <div class="spinner"></div>
+    </div>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // Parse the hash fragment to extract tokens
+            const hash = window.location.hash.substring(1);
+            const params = new URLSearchParams(hash);
+            
+            // Get tokens
+            const idToken = params.get('id_token');
+            const accessToken = params.get('access_token');
+            
+            if (idToken && accessToken) {
+                // Extract token expiration time from JWT payload
+                try {
+                    const payload = idToken.split('.')[1];
+                    const decodedPayload = JSON.parse(atob(payload));
+                    const expiryTime = decodedPayload.exp * 1000; // Convert to milliseconds
+                    
+                    // Store tokens in localStorage with expiration
+                    localStorage.setItem('id_token', idToken);
+                    localStorage.setItem('access_token', accessToken);
+                    localStorage.setItem('token_expiry', expiryTime.toString());
+                    
+                    console.log("Authentication successful, tokens stored");
+                } catch (e) {
+                    console.error("Error parsing token payload:", e);
+                    localStorage.setItem('id_token', idToken);
+                    localStorage.setItem('access_token', accessToken);
+                }
+                
+                // Set cookies for CloudFront function to detect
+                document.cookie = `CognitoIdentityServiceProvider.idToken=${idToken}; path=/; max-age=${60*60*24*7}; secure; domain=${window.location.hostname}`;
+                document.cookie = `CognitoIdentityServiceProvider.accessToken=${accessToken}; path=/; max-age=${60*60*24*7}; secure; domain=${window.location.hostname}`;
+                
+                // Redirect to the main application with a clean URL
+                console.log("Redirecting to home page...");
+                setTimeout(function() {
+                    window.location.href = '/index.html';
+                }, 1000);
+            } else {
+                console.error("No tokens found in URL hash");
+                alert('Authentication failed. No tokens received.');
+                window.location.href = '/';
+            }
+        });
+    </script>
+</body>
+</html>
+
+```
 
 ### 4. Create Cloudfront Distribution
 
 Create Cloudfront Distribution with cloudfront-function.js in 'viewer-request' and origin as S3 (Set up proper bucket policy and integrate cloudfront)
 
-### 5. Test it
+Refer attach cloudfront-function.js for cloudfront creation
+
+### 5. Tested Out
+If you hit YOUR_URL then you will land on cognito window
+
+<img width="1860" height="870" alt="cognito-page" src="https://github.com/user-attachments/assets/c8f078b9-0fa0-4dc8-8443-169513725161" />
+
+After Login
+
+<img width="1902" height="526" alt="home-page" src="https://github.com/user-attachments/assets/277bc4ac-0c62-4711-b593-5f41df2e8fd3" />
+
+Control Plane
+
+<img width="1873" height="929" alt="homepage-two" src="https://github.com/user-attachments/assets/f56c03de-a491-4fff-bdc1-a7adebcf7c91" />
+
+<img width="1894" height="955" alt="homepage-three" src="https://github.com/user-attachments/assets/c2d99ec4-4f6b-40a0-9df4-7abef265042e" />
+
+
+
+
