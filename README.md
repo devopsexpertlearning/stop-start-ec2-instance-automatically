@@ -1349,7 +1349,7 @@ Control Plane
 Perform Action
 <img width="1894" height="955" alt="homepage-three" src="https://github.com/user-attachments/assets/c2d99ec4-4f6b-40a0-9df4-7abef265042e" />
 
-## Contributing
+## 6. Contributing
 
 Contributions are welcome!
 Ideas for improvement:
@@ -1365,10 +1365,10 @@ Mobile-friendly design
 
 Submit a PR or open an issue.
 
-## 📜 License
+## 7. 📜 License
 
 This project is open source and available under the MIT License.
-You are free to use, modify, and distribute it with proper attribution
+You are free to use, modify, and distribute it with proper attribution.
 
 
 
