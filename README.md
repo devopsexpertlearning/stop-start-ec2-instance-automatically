@@ -676,7 +676,7 @@ In index.html, callback.html and cloudfront-function.js you need to replace belo
 - CLIENT_ID (Cognito Client ID)
 - YOUR_URL (Your frontend url)
 
-index.html
+#### index.html
 
 ```html
 <!DOCTYPE html>
@@ -1218,7 +1218,7 @@ index.html
 </body>
 </html>
 ```
-####Callback.html
+#### Callback.html
 
 ```html
 <!DOCTYPE html>
