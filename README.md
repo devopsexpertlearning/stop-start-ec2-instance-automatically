@@ -1351,19 +1351,16 @@ Perform Action
 
 ## 6. Contributing
 
-Contributions are welcome!
-Ideas for improvement:
+### Contributions are welcome!
 
-Error handling and API retry logic
+### Ideas for improvement:
 
-Dark/Light theme toggle
+- Error handling and API retry logic
+- Dark/Light theme toggle
+- Configurable backend URL
+- Mobile-friendly design
 
-Configurable backend URL
-
-Mobile-friendly design
-
-
-Submit a PR or open an issue.
+### Submit a PR or open an issue.
 
 ## 7. 📜 License
 
